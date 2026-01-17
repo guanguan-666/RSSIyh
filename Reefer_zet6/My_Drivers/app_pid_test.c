@@ -2,7 +2,7 @@
 #include "rtthread.h"
 #include "bsp_lora.h" // [新增] 引入LoRa驱动头文件
 #include <string.h>
-
+#include "main.h"
 #define DOF 6
 
 // ============================================
@@ -211,33 +211,32 @@ MSH_CMD_EXPORT(pid_test, Run PID Manual Pack);
 
 #include "usart.h" // 引入 huart3
 
-// 简单的协议帧定义 (用于和 MATLAB 通信)
-#pragma pack(push, 1)
-typedef struct {
-    uint8_t header; // 0xA5
-    float target;   // MATLAB 发来的目标值
-    float current;  // MATLAB 发来的当前状态
-    uint8_t tail;   // 0x5A
-} MatlabRxFrame_t;
 
-typedef struct {
-    uint8_t header; // 0xA5
-    float output;   // STM32 计算的控制量
-    uint8_t tail;   // 0x5A
-} MatlabTxFrame_t;
-#pragma pack(pop)
 
 // 变量
 static uint8_t is_matlab_mode = 0;
 static uint8_t rx3_buf[sizeof(MatlabRxFrame_t)]; // 接收缓冲区
 static struct PID **global_pid_vector = NULL;    // 复用之前的 PID 指针
+/* 引入必要的头文件，确保能用 memcpy 或 abs 等函数 */
+#include <string.h>
+#include <math.h>
 
+/* 定义 PID 参数 (你可以直接在这里改，不用去其他文件找) */
+#define PID_KP  15.0f   // 比例系数：负责响应速度
+#define PID_KI  0.5f    // 积分系数：负责消除静态误差
+#define PID_KD  2.5f    // 微分系数：负责抑制震荡
+
+/* 定义限制参数 */
+#define OUT_MAX 1000.0f // PWM 输出最大值 (例如 1000)
+#define OUT_MIN -1000.0f
+#define INT_MAX 500.0f  // 积分限幅 (防止积分饱和过大)
 // --------------------------------------------------------
 // 串口3 接收中断回调 (由 main.c 调用)
 // --------------------------------------------------------
 void PID_UART3_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    if (!is_matlab_mode || global_pid_vector == NULL) {
+    // 0. 安全检查
+    if (!is_matlab_mode) {
         // 如果没开启模式，继续监听但不处理
         HAL_UART_Receive_IT(&huart3, rx3_buf, sizeof(MatlabRxFrame_t));
         return;
@@ -245,31 +244,67 @@ void PID_UART3_RxCpltCallback(UART_HandleTypeDef *huart)
 
     // 1. 简单的帧校验
     MatlabRxFrame_t *rx_frame = (MatlabRxFrame_t*)rx3_buf;
+    
     if (rx_frame->header == 0xA5 && rx_frame->tail == 0x5A)
     {
-        // 2. 提取数据
-        float idea = rx_frame->target;
-        float real = rx_frame->current;
-        int control_id = 5; // 假设控制第5个自由度
+        // 2. 提取数据 (MATLAB 发来的)
+        float target = rx_frame->target;   // 目标值 (Idea)
+        float current = rx_frame->current; // 当前值 (Real)
 
-        // 3. 调用你的模糊 PID 核心算法
-        // 注意：这里复用了你之前的 direct 逻辑，假设为 true
-        int out_int = fuzzy_pid_motor_pwd_output(real, idea, true, global_pid_vector[control_id]);
+        // ==========================================================
+        // 3. 【核心】手写 PID 算法实现 (替代外部函数)
+        // ==========================================================
         
+        // 使用 static 变量来保存上一次的状态 (因为中断结束后普通变量会消失)
+        static float last_error = 0.0f; // 上一次的误差
+        static float integral = 0.0f;   // 积分累加值
+
+        // A. 计算当前误差
+        float error = target - current;
+
+        // B. 积分项计算 (带抗饱和限制)
+        integral += error;
+        if (integral > INT_MAX) integral = INT_MAX;
+        else if (integral < -INT_MAX) integral = -INT_MAX;
+
+        // C. PID 公式: P项 + I项 + D项
+        // P = Kp * error
+        // I = Ki * integral
+        // D = Kd * (error - last_error) -> 简单的微分近似
+        float p_out = PID_KP * error;
+        float i_out = PID_KI * integral;
+        float d_out = PID_KD * (error - last_error);
+
+        float total_out = p_out + i_out + d_out;
+
+        // D. 更新历史误差 (为下一次计算做准备)
+        last_error = error;
+
+        // E. 输出限幅 (Clamping)
+        if (total_out > OUT_MAX) total_out = OUT_MAX;
+        else if (total_out < OUT_MIN) total_out = OUT_MIN;
+
+        // 最终转换为整数 (PWM 占空比)
+        int out_int = (int)total_out;
+
+        // ==========================================================
         // 4. 发送回 MATLAB
+        // ==========================================================
         MatlabTxFrame_t tx_frame;
         tx_frame.header = 0xA5;
-        tx_frame.output = (float)out_int; // 发送浮点或者整数看你MATLAB怎么解
+        tx_frame.output = (float)out_int; // 发送计算好的 PWM 值
         tx_frame.tail = 0x5A;
         
+        // 发送 6 个字节
         HAL_UART_Transmit(&huart3, (uint8_t*)&tx_frame, sizeof(MatlabTxFrame_t), 10);
+        
+        // 【可选】调试打印：在串口调试助手看数据 (如果不接MATLAB的话)
+        // rt_kprintf("T:%.1f C:%.1f E:%.1f Out:%d\n", target, current, error, out_int);
     }
 
     // 5. 重新开启接收中断 (接收下一帧)
-    // 这里的长度必须严格匹配结构体大小
     HAL_UART_Receive_IT(&huart3, rx3_buf, sizeof(MatlabRxFrame_t));
 }
-
 // --------------------------------------------------------
 // 新增 FinSH 命令: pid_matlab
 // 用法: pid_matlab 1 (开启) / pid_matlab 0 (关闭)

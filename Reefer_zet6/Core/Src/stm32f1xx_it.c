@@ -28,20 +28,6 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN TD */
 
-/* 引入外部句柄 */
-extern UART_HandleTypeDef huart3;
-
-/**
-  * @brief This function handles USART3 global interrupt.
-  */
-void USART3_IRQHandler(void)
-{
-  /* 必须调用 HAL 库的中断处理函数 */
-  HAL_UART_IRQHandler(&huart3);
-  
-  /* 注意：HAL_UART_IRQHandler 会自动调用 HAL_UART_RxCpltCallback */
-  /* 你不需要在这里写回调逻辑，只要这一句就够了 */
-}
 
 /* USER CODE END TD */
 
@@ -241,5 +227,25 @@ void SysTick_Handler(void)
 
   rt_interrupt_leave(); /* 退出中断时必须调用 */
 }
+
+
+/* ========================================================== */
+/* 【修复】添加串口3中断服务函数                             */
+/* 如果不加这个，一开启中断单片机就会死机！                  */
+/* ========================================================== */
+
+/* 引入串口3句柄 (如果文件头没包含 usart.h) */
+extern UART_HandleTypeDef huart3;
+
+/**
+  * @brief This function handles USART3 global interrupt.
+  */
+void USART3_IRQHandler(void)
+{
+  /* 调用 HAL 库的通用中断处理函数 */
+  /* 该函数会自动清除标志位，并调用 HAL_UART_RxCpltCallback */
+  HAL_UART_IRQHandler(&huart3);
+}
+
 /* USER CODE END 1 */
 

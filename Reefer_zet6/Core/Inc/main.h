@@ -78,6 +78,25 @@ void Error_Handler(void);
 /* USER CODE BEGIN Private defines */
 #define LORA_NSS_GPIO_Port GPIOA
 #define LORA_NSS_Pin GPIO_PIN_4
+
+// 简单的协议帧定义 (用于和 MATLAB 通信)
+#pragma pack(push, 1) // 保存当前对齐方式，并设置为 1 字节对齐
+
+typedef struct {
+    uint8_t header; 
+    float target;   
+    float current;  
+    uint8_t tail;   
+} MatlabRxFrame_t; // 此时 sizeof = 1+4+4+1 = 10
+
+typedef struct {
+    uint8_t header; 
+    float output;   
+    uint8_t tail;   
+} MatlabTxFrame_t; // 此时 sizeof = 1+4+1 = 6
+
+#pragma pack(pop) // 恢复之前的对齐方式，不影响后面的代码
+
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

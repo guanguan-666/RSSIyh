@@ -64,6 +64,7 @@ void SystemClock_Config(void);
 extern void lora_thread_entry(void *parameter);
 extern void PID_UART3_RxCpltCallback(UART_HandleTypeDef *huart);
 extern rt_thread_t tid;
+extern 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -132,10 +133,6 @@ int main(void)
   MX_SPI1_Init();
   MX_USART1_UART_Init();
   MX_USART3_UART_Init();
-    // === [新增] 初始化随机数种子 ===
-    // 利用 STM32 唯一的 96位 UID 的一部分作为种子
-    // 这样 Node 10 和 Node 11 的 rand() 结果就完全不同了
-    srand(HAL_GetUIDw0());
   /* USER CODE BEGIN 2 */
     rt_kprintf("\n");
     rt_kprintf("==========================================\n");
@@ -150,6 +147,8 @@ int main(void)
   
   /* 2. 启动用户线程 */
   User_App_Start();
+   rt_kprintf("Rx Size: %d (Expect 10)\n", sizeof(MatlabRxFrame_t));
+   rt_kprintf("Tx Size: %d (Expect 6)\n", sizeof(MatlabTxFrame_t));
 
   /* USER CODE END 2 */
 
@@ -160,10 +159,11 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    // LED 心跳，证明系统没死机
-    rt_thread_mdelay(1000); 
-  }
+/* 让主线程仅仅作为心跳闪烁，频率低一点，证明系统活着 */
+      HAL_GPIO_TogglePin(GPIOE, GPIO_PIN_5); 
+      rt_thread_mdelay(1000); // 每秒闪一次，不干扰其他线程
   /* USER CODE END 3 */
+  }
 }
 
 /**
@@ -205,11 +205,15 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+/* 引入外部回调函数 */
+extern void PID_UART3_RxCpltCallback(UART_HandleTypeDef *huart);
+
+/* HAL库串口接收完成回调 */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
+    /* 如果是串口3，交给 PID 模块处理 */
     if (huart->Instance == USART3)
     {
-        // 如果是串口3的数据，交给 PID 模块处理
         PID_UART3_RxCpltCallback(huart);
     }
 }
@@ -254,7 +258,7 @@ void Error_Handler(void)
 #ifdef  USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
-  * where the assert_param error has occurred.
+  *         where the assert_param error has occurred.
   * @param  file: pointer to the source file name
   * @param  line: assert_param error line source number
   * @retval None
@@ -267,3 +271,4 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
