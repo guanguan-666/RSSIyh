@@ -28,6 +28,21 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN TD */
 
+/* 引入外部句柄 */
+extern UART_HandleTypeDef huart3;
+
+/**
+  * @brief This function handles USART3 global interrupt.
+  */
+void USART3_IRQHandler(void)
+{
+  /* 必须调用 HAL 库的中断处理函数 */
+  HAL_UART_IRQHandler(&huart3);
+  
+  /* 注意：HAL_UART_IRQHandler 会自动调用 HAL_UART_RxCpltCallback */
+  /* 你不需要在这里写回调逻辑，只要这一句就够了 */
+}
+
 /* USER CODE END TD */
 
 /* Private define ------------------------------------------------------------*/

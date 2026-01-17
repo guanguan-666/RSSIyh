@@ -204,4 +204,120 @@ void pid_test(void)
 }
 MSH_CMD_EXPORT(pid_test, Run PID Manual Pack);
 
+/* ================================================================= */
+/* 以下为新增的 MATLAB HIL 模式代码                   */
+/* (Append this to the end of app_pid_test.c)              */
+/* ================================================================= */
+
+#include "usart.h" // 引入 huart3
+
+// 简单的协议帧定义 (用于和 MATLAB 通信)
+#pragma pack(push, 1)
+typedef struct {
+    uint8_t header; // 0xA5
+    float target;   // MATLAB 发来的目标值
+    float current;  // MATLAB 发来的当前状态
+    uint8_t tail;   // 0x5A
+} MatlabRxFrame_t;
+
+typedef struct {
+    uint8_t header; // 0xA5
+    float output;   // STM32 计算的控制量
+    uint8_t tail;   // 0x5A
+} MatlabTxFrame_t;
+#pragma pack(pop)
+
+// 变量
+static uint8_t is_matlab_mode = 0;
+static uint8_t rx3_buf[sizeof(MatlabRxFrame_t)]; // 接收缓冲区
+static struct PID **global_pid_vector = NULL;    // 复用之前的 PID 指针
+
+// --------------------------------------------------------
+// 串口3 接收中断回调 (由 main.c 调用)
+// --------------------------------------------------------
+void PID_UART3_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (!is_matlab_mode || global_pid_vector == NULL) {
+        // 如果没开启模式，继续监听但不处理
+        HAL_UART_Receive_IT(&huart3, rx3_buf, sizeof(MatlabRxFrame_t));
+        return;
+    }
+
+    // 1. 简单的帧校验
+    MatlabRxFrame_t *rx_frame = (MatlabRxFrame_t*)rx3_buf;
+    if (rx_frame->header == 0xA5 && rx_frame->tail == 0x5A)
+    {
+        // 2. 提取数据
+        float idea = rx_frame->target;
+        float real = rx_frame->current;
+        int control_id = 5; // 假设控制第5个自由度
+
+        // 3. 调用你的模糊 PID 核心算法
+        // 注意：这里复用了你之前的 direct 逻辑，假设为 true
+        int out_int = fuzzy_pid_motor_pwd_output(real, idea, true, global_pid_vector[control_id]);
+        
+        // 4. 发送回 MATLAB
+        MatlabTxFrame_t tx_frame;
+        tx_frame.header = 0xA5;
+        tx_frame.output = (float)out_int; // 发送浮点或者整数看你MATLAB怎么解
+        tx_frame.tail = 0x5A;
+        
+        HAL_UART_Transmit(&huart3, (uint8_t*)&tx_frame, sizeof(MatlabTxFrame_t), 10);
+    }
+
+    // 5. 重新开启接收中断 (接收下一帧)
+    // 这里的长度必须严格匹配结构体大小
+    HAL_UART_Receive_IT(&huart3, rx3_buf, sizeof(MatlabRxFrame_t));
+}
+
+// --------------------------------------------------------
+// 新增 FinSH 命令: pid_matlab
+// 用法: pid_matlab 1 (开启) / pid_matlab 0 (关闭)
+// --------------------------------------------------------
+extern volatile uint8_t is_lora_enable;
+void pid_matlab(int argc, char **argv)
+{
+    if (argc < 2) {
+        rt_kprintf("Usage: pid_matlab [0/1]\n");
+        return;
+    }
+
+    int enable = atoi(argv[1]);
+
+    if (enable) {
+        // 1. 【修改】关掉 LoRa 软开关
+        // LoRa 线程检测到这个变量为 0 后，会自动休眠，不进行接收和打印
+        is_lora_enable = 0;
+        rt_kprintf("[System] LoRa Logic PAUSED (Soft Switch).\n");
+        
+        // 2. 初始化 PID (如果还没初始化)
+        if (global_pid_vector == NULL) {
+            global_pid_vector = fuzzy_pid_vector_init(fuzzy_pid_params, 2.0f, 4, 1, 0, mf_params, rule_base, DOF);
+            if (global_pid_vector == NULL) {
+                rt_kprintf("Memory Error!\n");
+                return;
+            }
+        }
+        
+        // 3. 开启接收中断
+        is_matlab_mode = 1;
+        // 建议清除一下 RXNE 标志位，防止有残留数据触发误动作
+        __HAL_UART_CLEAR_FLAG(&huart3, UART_FLAG_RXNE);
+        HAL_UART_Receive_IT(&huart3, rx3_buf, sizeof(MatlabRxFrame_t));
+        
+        rt_kprintf("\n=== MATLAB HIL Mode STARTED ===\n");
+        rt_kprintf("UART3 (PB10/PB11) is listening.\n");
+        
+    } else {
+        // 关闭 MATLAB 模式
+        is_matlab_mode = 0;
+        
+        // 4. 【修改】恢复 LoRa 软开关
+        is_lora_enable = 1;
+        
+        rt_kprintf("MATLAB HIL Mode STOPPED.\n");
+        rt_kprintf("[System] LoRa Logic RESUMED.\n");
+    }
+}
+MSH_CMD_EXPORT(pid_matlab, Start/Stop Matlab HIL Mode);
 

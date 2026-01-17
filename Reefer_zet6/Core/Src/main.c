@@ -52,7 +52,7 @@
 // =============================================================
 volatile float g_current_temp = 21.0f; // 初始化当前温度
 volatile float g_target_temp  = 20.0f; // 初始化目标温度
-
+rt_thread_t tid;
 
 /* USER CODE END PV */
 
@@ -62,7 +62,8 @@ void SystemClock_Config(void);
 
 // [新增] 声明外部的 LoRa 业务线程函数 (定义在 app_lora_node.c 中)
 extern void lora_thread_entry(void *parameter);
-
+extern void PID_UART3_RxCpltCallback(UART_HandleTypeDef *huart);
+extern rt_thread_t tid;
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -73,7 +74,7 @@ extern void lora_thread_entry(void *parameter);
  */
 void User_App_Start(void)
 {
-    rt_thread_t tid;
+    
 
 /* ================== 创建 LoRa 业务主线程 ================== */
     /* * lora_thread_entry: 在 app_lora_node.c 中定义的新业务逻辑
@@ -130,6 +131,7 @@ int main(void)
   MX_GPIO_Init();
   MX_SPI1_Init();
   MX_USART1_UART_Init();
+  MX_USART3_UART_Init();
     // === [新增] 初始化随机数种子 ===
     // 利用 STM32 唯一的 96位 UID 的一部分作为种子
     // 这样 Node 10 和 Node 11 的 rand() 结果就完全不同了
@@ -203,7 +205,14 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART3)
+    {
+        // 如果是串口3的数据，交给 PID 模块处理
+        PID_UART3_RxCpltCallback(huart);
+    }
+}
 /* USER CODE END 4 */
 
 /**

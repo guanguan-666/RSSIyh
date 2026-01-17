@@ -8,9 +8,10 @@
 #include "bsp_lora.h"
 #include "app_lora_protocol.h" 
 #include <stdlib.h> // for rand()
+#include "SX1278.h"
 
-
-
+/* 在文件最前面声明一个全局开关 */
+volatile uint8_t is_lora_enable = 1; // 1:开启, 0:关闭
 // ============================================
 // [新增] 引用外部变量 (Extern Declarations)
 // 告诉编译器这些变量在 app_pid_test.c 里
@@ -19,7 +20,7 @@ extern volatile float target_temperature;
 extern volatile float current_temperature; // 如果你的发送函数里用了它
 extern volatile float pid_out;             // 如果你的发送函数里用了它
 extern volatile uint8_t motor_state;
-
+extern rt_thread_t tid;
 
 extern uint8_t SX1278_SPIRead(SX1278_t * module, uint8_t addr);
 // ============================================
@@ -245,6 +246,15 @@ void lora_thread_entry(void *parameter)
 
     while (1)
     {
+        /* >>>>>>>>>> [新增] 软开关逻辑开始 >>>>>>>>>> */
+        // 如果开关被 PID 模块关闭，则暂停 LoRa 逻辑，只做延时
+        if (is_lora_enable == 0)
+        {
+            rt_thread_mdelay(200); // 挂起 200ms 释放 CPU
+            continue; // 直接跳过本次循环，不执行后面的接收和看门狗
+        }
+        /* <<<<<<<<<< [新增] 软开关逻辑结束 <<<<<<<<<< */
+
         if (SX1278_available(&lora))
         {
             len = SX1278_read(&lora, rx_buffer, sizeof(rx_buffer));
@@ -403,5 +413,8 @@ int LoRa_Get_Current_RSSI(void) {
     // 为了配合您的打印习惯，我们暂时返回 raw_value (正数)。
     return (int)raw_value;
 }
+
+
+
 
 
