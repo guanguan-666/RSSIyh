@@ -147,14 +147,16 @@ void pid_test(void)
 }
 MSH_CMD_EXPORT(pid_test, Run PID Manual Pack);
 
+/* MATLAB HIL Mode */
 static uint8_t is_matlab_mode = 0;
 static uint8_t rx3_buf[sizeof(MatlabRxFrame_t)];
 static struct PID **global_pid_vector = NULL;
 
-#define PID_KP 15.0f
-#define PID_KI 0.5f
-#define PID_KD 2.5f
-#define OUT_MAX 1000.0f
+/* PID 参数 - 针对一阶惯性+纯滞后系统优化 */
+#define PID_KP  0.39f    // 0.3857 ≈ 0.39
+#define PID_KI  0.005f   // 0.0047 ≈ 0.005
+#define PID_KD  15.0f    // 15.0
+#define OUT_MAX  1000.0f
 #define OUT_MIN -1000.0f
 #define INTEGRAL_MAX 500.0f
 
@@ -163,16 +165,19 @@ extern UART_HandleTypeDef huart1;
 
 void PID_UART3_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    HAL_UART_Transmit(&huart1, (uint8_t*)"[IRQ]\r\n", 7, 10);
+    // 1. 确认进入回调
+    HAL_UART_Transmit(&huart1, (uint8_t*)"[CALLBACK]\r\n", 12, 10);
     
     if (! is_matlab_mode) {
+        HAL_UART_Transmit(&huart1, (uint8_t*)"[NOT MATLAB MODE]\r\n", 19, 10);
         HAL_UART_Receive_IT(&huart3, rx3_buf, sizeof(MatlabRxFrame_t));
         return;
     }
 
     MatlabRxFrame_t *rx_frame = (MatlabRxFrame_t*)rx3_buf;
     
-    char debug[80];
+    // 2. 打印接收到的原始数据
+    char debug[100];
     sprintf(debug, "[RX] %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
             rx3_buf[0], rx3_buf[1], rx3_buf[2], rx3_buf[3], rx3_buf[4],
             rx3_buf[5], rx3_buf[6], rx3_buf[7], rx3_buf[8], rx3_buf[9]);
@@ -182,43 +187,52 @@ void PID_UART3_RxCpltCallback(UART_HandleTypeDef *huart)
     {
         float target = rx_frame->target;
         float current = rx_frame->current;
+        
+        // 3. 打印解析后的数据
+        int t_int = (int)(target * 100);
+        int c_int = (int)(current * 100);
+        sprintf(debug, "[PARSE] Target=%.2f, Current=%.2f\r\n", target, current);
+        HAL_UART_Transmit(&huart1, (uint8_t*)debug, strlen(debug), 100);
 
-        static float last_error = 0.0f;
-        static float integral = 0.0f;
-
+        // PID计算
+        static float integral = 0;
+        static float last_error = 0;
+        
         float error = target - current;
         integral += error;
         
+        // 积分限幅
         if (integral > INTEGRAL_MAX) integral = INTEGRAL_MAX;
         else if (integral < -INTEGRAL_MAX) integral = -INTEGRAL_MAX;
-
-        float p_out = PID_KP * error;
-        float i_out = PID_KI * integral;
-        float d_out = PID_KD * (error - last_error);
-        float total_out = p_out + i_out + d_out;
         
+        float total_out = PID_KP * error + PID_KI * integral + PID_KD * (error - last_error);
         last_error = error;
-
+        
+        // 输出限幅
         if (total_out > OUT_MAX) total_out = OUT_MAX;
         else if (total_out < OUT_MIN) total_out = OUT_MIN;
-
-        int t_int = (int)target;
-        int c_int = (int)current;
-        int o_int = (int)total_out;
-        sprintf(debug, "[PID] T:%d C:%d E: %.1f O:%d\r\n", t_int, c_int, error, o_int);
+        
+        // 4. 打印PID计算结果
+        sprintf(debug, "[PID] Err=%.2f, Out=%.2f (Kp=%.2f,Ki=%.4f,Kd=%.2f)\r\n", 
+                error, total_out, PID_KP, PID_KI, PID_KD);
         HAL_UART_Transmit(&huart1, (uint8_t*)debug, strlen(debug), 100);
 
+        // 发送回MATLAB
         MatlabTxFrame_t tx_frame;
         tx_frame.header = 0xA5;
         tx_frame.output = total_out;
         tx_frame.tail = 0x5A;
         
         HAL_UART_Transmit(&huart3, (uint8_t*)&tx_frame, sizeof(MatlabTxFrame_t), 10);
-        HAL_UART_Transmit(&huart1, (uint8_t*)"[TX OK]\r\n", 9, 10);
+        
+        // 5. 确认发送
+        sprintf(debug, "[TX] Sent:  %.2f\r\n", total_out);
+        HAL_UART_Transmit(&huart1, (uint8_t*)debug, strlen(debug), 100);
     }
     else
     {
-        HAL_UART_Transmit(&huart1, (uint8_t*)"[FRAME ERR]\r\n", 13, 10);
+        sprintf(debug, "[ERR] Frame invalid:  H=%02X, T=%02X\r\n", rx_frame->header, rx_frame->tail);
+        HAL_UART_Transmit(&huart1, (uint8_t*)debug, strlen(debug), 100);
     }
 
     HAL_UART_Receive_IT(&huart3, rx3_buf, sizeof(MatlabRxFrame_t));
