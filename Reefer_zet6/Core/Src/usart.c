@@ -135,8 +135,8 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
     PB11     ------> USART3_RX
     */
     GPIO_InitStruct.Pin = GPIO_PIN_10;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    GPIO_InitStruct. Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct. Speed = GPIO_SPEED_FREQ_HIGH;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
     GPIO_InitStruct.Pin = GPIO_PIN_11;
@@ -144,9 +144,11 @@ void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /* USER CODE BEGIN USART3_MspInit 1 */
-
-  /* USER CODE END USART3_MspInit 1 */
+    /* USER CODE BEGIN USART3_MspInit 1 */
+    /* USART3 interrupt Init */
+    HAL_NVIC_SetPriority(USART3_IRQn, 6, 0);  // RT-Thread 要求优先级 > 5
+    HAL_NVIC_EnableIRQ(USART3_IRQn);
+    /* USER CODE END USART3_MspInit 1 */
   }
 }
 
