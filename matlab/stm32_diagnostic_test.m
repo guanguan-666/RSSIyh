@@ -27,7 +27,11 @@ function stm32_diagnostic_test()
     [value1, valid1, debug1] = parse_stm32_response_diagnostic(test_case_1);
     if valid1
         fprintf('✓ Parsed value: %.2f\n', value1);
-        fprintf('  Status: %s\n', abs(value1 - 3.64) < 0.01 ? 'PASS' : 'FAIL');
+        if abs(value1 - 3.64) < 0.01
+            fprintf('  Status: PASS\n');
+        else
+            fprintf('  Status: FAIL\n');
+        end
     else
         fprintf('✗ Parse failed: %s\n', debug1.error);
     end
@@ -44,7 +48,11 @@ function stm32_diagnostic_test()
     [value2, valid2, debug2] = parse_stm32_response_diagnostic(neg84_bytes);
     if valid2
         fprintf('✓ Parsed value: %.2f\n', value2);
-        fprintf('  Status: %s\n', abs(value2 - (-84.00)) < 0.01 ? 'PASS' : 'FAIL');
+        if abs(value2 - (-84.00)) < 0.01
+            fprintf('  Status: PASS\n');
+        else
+            fprintf('  Status: FAIL\n');
+        end
     else
         fprintf('✗ Parse failed: %s\n', debug2.error);
     end
@@ -60,7 +68,11 @@ function stm32_diagnostic_test()
     [value3, valid3, debug3] = parse_stm32_response_diagnostic(zero_bytes);
     if valid3
         fprintf('✓ Parsed value: %.2f\n', value3);
-        fprintf('  Status: %s\n', abs(value3 - 0.00) < 0.01 ? 'PASS' : 'FAIL');
+        if abs(value3 - 0.00) < 0.01
+            fprintf('  Status: PASS\n');
+        else
+            fprintf('  Status: FAIL\n');
+        end
     else
         fprintf('✗ Parse failed: %s\n', debug3.error);
     end
@@ -76,7 +88,11 @@ function stm32_diagnostic_test()
     [value4, valid4, debug4] = parse_stm32_response_diagnostic(hundred_bytes);
     if valid4
         fprintf('✓ Parsed value: %.2f\n', value4);
-        fprintf('  Status: %s\n', abs(value4 - 100.00) < 0.01 ? 'PASS' : 'FAIL');
+        if abs(value4 - 100.00) < 0.01
+            fprintf('  Status: PASS\n');
+        else
+            fprintf('  Status: FAIL\n');
+        end
     else
         fprintf('✗ Parse failed: %s\n', debug4.error);
     end
@@ -92,7 +108,11 @@ function stm32_diagnostic_test()
     [value5, valid5, debug5] = parse_stm32_response_diagnostic(neg50_bytes);
     if valid5
         fprintf('✓ Parsed value: %.2f\n', value5);
-        fprintf('  Status: %s\n', abs(value5 - (-50.50)) < 0.01 ? 'PASS' : 'FAIL');
+        if abs(value5 - (-50.50)) < 0.01
+            fprintf('  Status: PASS\n');
+        else
+            fprintf('  Status: FAIL\n');
+        end
     else
         fprintf('✗ Parse failed: %s\n', debug5.error);
     end
