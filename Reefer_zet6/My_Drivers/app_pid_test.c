@@ -4,7 +4,7 @@
 #include <string.h>
 #include "main.h"
 #include "usart.h"
-
+#include <stdio.h>
 #define DOF 6
 
 volatile float target_temperature = 25.0f; 
@@ -148,15 +148,15 @@ void pid_test(void)
 MSH_CMD_EXPORT(pid_test, Run PID Manual Pack);
 
 // 定义接收缓冲区 (如果你的 .h 里没声明，这里补上)
-volatile uint8_t is_matlab_mode = 0;       // 默认关闭 MATLAB 模式
-uint8_t rx3_buf[sizeof(MatlabRxFrame_t)];  // 接收缓冲区
+volatile uint8_t is_matlab_mode = 1;       // 默认关闭 MATLAB 模式
+uint8_t rx3_buf[20];  // 接收缓冲区
 
 /* 包含必要的头文件 */
 
 #include "app_lora_protocol.h"
 #include "usart.h"
 #include <math.h>
-
+#include "stm32f1xx_hal.h"
 // ==========================================
 // ?? 1. 在这里填入你的仿真最优参数
 // ==========================================
@@ -181,88 +181,182 @@ volatile float g_pid_kd = 7.4f;
 static float last_error = 0.0f;
 static float integral_sum = 0.0f;
 
+//void PID_UART3_RxCpltCallback(UART_HandleTypeDef *huart)
+//{
+//    // 1. 安全检查: 如果没开启 HIL 模式，仅维持接收但不处理
+//    // (这里也必须接收 14 字节，防止数据错位堆积)
+//    if (!is_matlab_mode) {
+//        HAL_UART_Receive_IT(&huart3, rx3_buf, 14); 
+//        return;
+//    }
+
+//    // 2. 准备校验索引
+//    // MatlabRxFrame_t (控制包) 通常为 10 字节，帧尾在 index 9
+//    // MatlabParamFrame_t (参数包) 通常为 14 字节，帧尾在 index 13
+//    uint8_t head = rx3_buf[0];
+//    uint8_t tail_pos_control = sizeof(MatlabRxFrame_t) - 1;   
+//    uint8_t tail_pos_param   = sizeof(MatlabParamFrame_t) - 1; 
+
+//    // ==========================================================
+//    // 情况 A: 收到 PID 控制指令 (0xA5)
+//    // ==========================================================
+//    // 校验：头是 0xA5 且 第10个字节(index 9) 是 0x5A
+//    if (head == 0xA5 && rx3_buf[tail_pos_control] == 0x5A) 
+//    {
+//        MatlabRxFrame_t *rx_frame = (MatlabRxFrame_t*)rx3_buf;
+//        
+//        float target = rx_frame->target;
+//        float current = rx_frame->current;
+
+//        // --- PID 核心算法 ---
+//        float error = target - current;
+
+//        integral_sum += error;
+//        // 积分抗饱和
+//        if (integral_sum > INTEGRAL_MAX) integral_sum = INTEGRAL_MAX;
+//        else if (integral_sum < -INTEGRAL_MAX) integral_sum = -INTEGRAL_MAX;
+
+//        // 使用全局变量 g_pid_... 计算
+//        float p_out = g_pid_kp * error;
+//        float i_out = g_pid_ki * integral_sum;
+//        float d_out = g_pid_kd * (error - last_error);
+
+//        float total_out = p_out + i_out + d_out;
+//        last_error = error;
+
+//        // 输出限幅
+//        if (total_out > OUTPUT_MAX) total_out = OUTPUT_MAX;
+//        else if (total_out < -OUTPUT_MAX) total_out = -OUTPUT_MAX;
+
+//        // 发送回 Matlab (发送浮点数)
+//        MatlabTxFrame_t tx_frame;
+//        tx_frame.header = 0xA5;
+//        tx_frame.output = total_out; 
+//        tx_frame.tail   = 0x5A;
+//        
+//        // 发送 6 字节 (4字节float + 头尾)
+//        HAL_UART_Transmit(&huart3, (uint8_t*)&tx_frame, sizeof(MatlabTxFrame_t), 10);
+//    }
+//    // ==========================================================
+//    // 情况 B: 收到 参数更新指令 (0xB6)
+//    // ==========================================================
+//    // 校验：头是 0xB6 且 第14个字节(index 13) 是 0x5A
+//    else if (head == 0xB6 && rx3_buf[tail_pos_param] == 0x5A)
+//    {
+//        MatlabParamFrame_t *param_frame = (MatlabParamFrame_t*)rx3_buf;
+
+//        // 1. 更新全局 PID 参数
+//        g_pid_kp = param_frame->new_kp;
+//        g_pid_ki = param_frame->new_ki;
+//        g_pid_kd = param_frame->new_kd;
+
+//        // 2. 清零历史状态 (防止参数突变导致系统震荡)
+//        integral_sum = 0.0f;
+//        last_error = 0.0f;
+
+//        // (调试用) 可在此处翻转 LED 指示参数更新成功
+//    }
+//    
+//    // ==========================================================
+//    // 3. [关键修正] 重新开启中断
+//    // ==========================================================
+//    // 必须强制设为 14，因为 Matlab 脚本现在固定发送 14 字节
+//    // 即使是控制包(10字节有效)，Matlab 也会补 4 个字节的 0
+//    HAL_UART_Receive_IT(&huart3, rx3_buf, 14);
+//}
+
 void PID_UART3_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    // 1. 安全检查: 如果没开启 HIL 模式，仅维持接收但不处理
-    // (这里也必须接收 14 字节，防止数据错位堆积)
-    if (!is_matlab_mode) {
-        HAL_UART_Receive_IT(&huart3, rx3_buf, 14); 
-        return;
+    // =================================================================
+    // ?? 调试第一步：不管三七二十一，先打印收到的原始数据
+    // =================================================================
+    rt_kprintf("\n[RX Raw]: ");
+    for (int i = 0; i < 14; i++) {
+        rt_kprintf("%02X ", rx3_buf[i]);
     }
+    rt_kprintf("\n");
+    // =================================================================
 
-    // 2. 准备校验索引
-    // MatlabRxFrame_t (控制包) 通常为 10 字节，帧尾在 index 9
-    // MatlabParamFrame_t (参数包) 通常为 14 字节，帧尾在 index 13
+    // 1. 安全检查 (为了调试，暂时注释掉拦截，强制运行！)
+    // if (!is_matlab_mode) {
+    //     __HAL_UART_CLEAR_OREFLAG(&huart3);
+    //     HAL_UART_Receive_IT(&huart3, rx3_buf, 14);
+    //     return;
+    // }
+
     uint8_t head = rx3_buf[0];
-    uint8_t tail_pos_control = sizeof(MatlabRxFrame_t) - 1;   
-    uint8_t tail_pos_param   = sizeof(MatlabParamFrame_t) - 1; 
 
-    // ==========================================================
+    // =================================================================
     // 情况 A: 收到 PID 控制指令 (0xA5)
-    // ==========================================================
-    // 校验：头是 0xA5 且 第10个字节(index 9) 是 0x5A
-    if (head == 0xA5 && rx3_buf[tail_pos_control] == 0x5A) 
+    // =================================================================
+    // 校验：头是 A5，且第 10 个字节 (index 9) 是 5A
+    if (head == 0xA5 && rx3_buf[9] == 0x5A) 
     {
         MatlabRxFrame_t *rx_frame = (MatlabRxFrame_t*)rx3_buf;
-        
         float target = rx_frame->target;
         float current = rx_frame->current;
+        
+        // 打印解析结果，看看单片机读到的数对不对
+        rt_kprintf(" -> [CMD: Control] Tgt: %d, Cur: %d\n", (int)target, (int)current);
 
-        // --- PID 核心算法 ---
+        // --- PID 计算 ---
         float error = target - current;
-
         integral_sum += error;
+        
         // 积分抗饱和
-        if (integral_sum > INTEGRAL_MAX) integral_sum = INTEGRAL_MAX;
-        else if (integral_sum < -INTEGRAL_MAX) integral_sum = -INTEGRAL_MAX;
+        if (integral_sum > 1000.0f) integral_sum = 1000.0f;
+        else if (integral_sum < -1000.0f) integral_sum = -1000.0f;
 
-        // 使用全局变量 g_pid_... 计算
         float p_out = g_pid_kp * error;
         float i_out = g_pid_ki * integral_sum;
         float d_out = g_pid_kd * (error - last_error);
-
         float total_out = p_out + i_out + d_out;
         last_error = error;
 
         // 输出限幅
-        if (total_out > OUTPUT_MAX) total_out = OUTPUT_MAX;
-        else if (total_out < -OUTPUT_MAX) total_out = -OUTPUT_MAX;
+        if (total_out > 100.0f) total_out = 100.0f;
+        else if (total_out < -100.0f) total_out = -100.0f;
 
-        // 发送回 Matlab (发送浮点数)
+        // --- 回复 Matlab ---
         MatlabTxFrame_t tx_frame;
         tx_frame.header = 0xA5;
         tx_frame.output = total_out; 
         tx_frame.tail   = 0x5A;
         
-        // 发送 6 字节 (4字节float + 头尾)
-        HAL_UART_Transmit(&huart3, (uint8_t*)&tx_frame, sizeof(MatlabTxFrame_t), 10);
+        HAL_UART_Transmit(&huart3, (uint8_t*)&tx_frame, sizeof(MatlabTxFrame_t), 50);
+        
+        rt_kprintf(" -> Sent Output: %d (x100)\n", (int)(total_out * 100));
     }
-    // ==========================================================
+    // =================================================================
     // 情况 B: 收到 参数更新指令 (0xB6)
-    // ==========================================================
-    // 校验：头是 0xB6 且 第14个字节(index 13) 是 0x5A
-    else if (head == 0xB6 && rx3_buf[tail_pos_param] == 0x5A)
+    // =================================================================
+    // 校验：头是 B6，且第 14 个字节 (index 13) 是 5A
+    else if (head == 0xB6 && rx3_buf[13] == 0x5A)
     {
         MatlabParamFrame_t *param_frame = (MatlabParamFrame_t*)rx3_buf;
-
-        // 1. 更新全局 PID 参数
+        
         g_pid_kp = param_frame->new_kp;
         g_pid_ki = param_frame->new_ki;
         g_pid_kd = param_frame->new_kd;
-
-        // 2. 清零历史状态 (防止参数突变导致系统震荡)
+        
+        // 换参数时清零状态
         integral_sum = 0.0f;
         last_error = 0.0f;
-
-        // (调试用) 可在此处翻转 LED 指示参数更新成功
+        
+        rt_kprintf(" -> [CMD: Param Update] OK! New Kp: %d (x1000)\n", (int)(g_pid_kp * 1000));
     }
-    
-    // ==========================================================
-    // 3. [关键修正] 重新开启中断
-    // ==========================================================
-    // 必须强制设为 14，因为 Matlab 脚本现在固定发送 14 字节
-    // 即使是控制包(10字节有效)，Matlab 也会补 4 个字节的 0
-    HAL_UART_Receive_IT(&huart3, rx3_buf, 14);
+    // =================================================================
+    // 情况 C: 数据错位或无效
+    // =================================================================
+    else
+    {
+        rt_kprintf(" -> [ERROR] Invalid Frame! Head=%02X, Tail9=%02X, Tail13=%02X\n", 
+                   head, rx3_buf[9], rx3_buf[13]);
+    }
+
+    // 3. 容错与重启接收 (关键！)
+    __HAL_UART_CLEAR_OREFLAG(&huart3);         // 清除溢出标志
+    HAL_UART_Receive_IT(&huart3, rx3_buf, 14); // 重新开启 14 字节接收
 }
 
 extern volatile uint8_t is_lora_enable;
@@ -270,45 +364,76 @@ extern volatile uint8_t is_lora_enable;
 void pid_matlab(int argc, char **argv)
 {
     if (argc < 2) {
-        rt_kprintf("Usage: pid_matlab [0/1]\n");
+        rt_kprintf("Usage:  pid_matlab [0/1]\n");
+        rt_kprintf("  pid_matlab 1  - Start MATLAB HIL mode\n");
+        rt_kprintf("  pid_matlab 0  - Stop MATLAB HIL mode\n");
         return;
     }
 
     int enable = atoi(argv[1]);
 
     if (enable) {
-        // 1. 暂停 LoRa 任务，防止干扰
+        // ==================== 启动模式 ====================
+        
+        // 1. 暂停 LoRa 任务
         is_lora_enable = 0;
+        rt_thread_mdelay(50);  // 等待 LoRa 任务停止
         rt_kprintf("[System] LoRa PAUSED.\n");
         
-        // 2. 标记进入 MATLAB 模式
-        is_matlab_mode = 1;
+        // 2. 完整清理 UART3 状态（关键！）
+        HAL_UART_AbortReceive(&huart3);  // 终止之前的接收
         
-        // 3. 清除之前的 UART 标志位，防止误触发
-        __HAL_UART_CLEAR_FLAG(&huart3, UART_FLAG_RXNE);
-        __HAL_UART_CLEAR_FLAG(&huart3, UART_FLAG_ORE);
+        // 清除硬件 FIFO 残留数据
+        __HAL_UART_FLUSH_DRREGISTER(&huart3);
         
-        // 4. 开启接收中断
+        // 清除所有标志位
+        __HAL_UART_CLEAR_FLAG(&huart3, UART_FLAG_RXNE | UART_FLAG_ORE | 
+                                       UART_FLAG_IDLE | UART_FLAG_TC);
+        
+        // 清空软件缓冲区
+        memset(rx3_buf, 0, sizeof(rx3_buf));
+        
+        // 3. 启动接收中断（14 字节固定长度）
         HAL_StatusTypeDef status = HAL_UART_Receive_IT(&huart3, rx3_buf, 14);
         
         if (status == HAL_OK) {
-            rt_kprintf("\n=== MATLAB HIL Mode STARTED ===\n");
+            // 4. 标记进入 MATLAB 模式（放在最后，避免中断提前触发）
+            is_matlab_mode = 1;
             
-            rt_kprintf("Waiting for MATLAB data on PB10/PB11...\n");
+            rt_kprintf("\n╔════════════════════════════════════╗\n");
+            rt_kprintf("║   MATLAB HIL Mode STARTED         ║\n");
+            rt_kprintf("╚════════════════════════════════════╝\n");
+            rt_kprintf("  UART3: PB10(TX) / PB11(RX)\n");
+            rt_kprintf("  Baud:   115200\n");
+            rt_kprintf("  Frame: 14 bytes (0xA5/0xB6 + data + checksum)\n");
+            rt_kprintf("  Waiting for MATLAB connection...\n\n");
         } else {
-            rt_kprintf("ERROR: UART3 Init Failed (code %d)\n", status);
+            rt_kprintf("[ERROR] UART3 Init Failed (code %d)\n", status);
+            is_lora_enable = 1;  // 失败则恢复 LoRa
         }
         
     } else {
-        // 退出模式
-        is_matlab_mode = 0;
-        is_lora_enable = 1; // 恢复 LoRa
+        // ==================== 退出模式 ====================
         
+        // 1. 停止接收中断
         HAL_UART_AbortReceive_IT(&huart3);
-        rt_kprintf("MATLAB HIL Mode STOPPED. LoRa Resumed.\n");
+        
+        // 2. 等待当前数据处理完毕
+        rt_thread_mdelay(10);
+        
+        // 3. 清理状态
+        memset(rx3_buf, 0, sizeof(rx3_buf));
+        __HAL_UART_CLEAR_FLAG(&huart3, UART_FLAG_RXNE | UART_FLAG_ORE);
+        
+        // 4. 更新模式标志
+        is_matlab_mode = 0;
+        is_lora_enable = 1;
+        
+        rt_kprintf("\n[System] MATLAB HIL Mode STOPPED.\n");
+        rt_kprintf("[System] LoRa Resumed.\n");
     }
 }
-MSH_CMD_EXPORT(pid_matlab, Start/Stop Matlab HIL Mode);
+MSH_CMD_EXPORT(pid_matlab, Start/Stop MATLAB HIL Mode);
 
 void test_uart3(void)
 {
