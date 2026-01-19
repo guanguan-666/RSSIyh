@@ -262,32 +262,49 @@ Test Case 2: Expected value = -84.00
 
 ### Float Representation
 
-**Example: 3.64**
+**IEEE 754 Single-Precision Format:**
+- 1 sign bit
+- 8 exponent bits
+- 23 mantissa bits
+- Total: 32 bits (4 bytes)
+
+**Byte Order (Endianness):**
+- **Little-endian:** Least significant byte (LSB) stored first
+- **Big-endian:** Most significant byte (MSB) stored first
+- **STM32:** Uses little-endian (ARM architecture default)
+
+**Example Conversion:**
+
+To verify the exact byte-to-float conversion for any value, use the diagnostic script:
+```matlab
+>> stm32_diagnostic_test
 ```
-Decimal: 3.64
-IEEE 754: 0x40E8B439
-Binary: 01000000 11101000 10110100 00111001
 
-Little-endian bytes (LSB first):
-  Byte[0]: 0x39 = 00111001 (bits 0-7)
-  Byte[1]: 0xB4 = 10110100 (bits 8-15)
-  Byte[2]: 0xE8 = 11101000 (bits 16-23)
-  Byte[3]: 0x40 = 01000000 (bits 24-31)
+The diagnostic script will show step-by-step conversion for known test values including:
+- Raw bytes in hexadecimal
+- uint32 representation
+- Final float value
+- System endianness detection
 
-Wait - let me recalculate:
-3.64 in IEEE 754 = 0x4068F5C3
-Little-endian: C3 F5 68 40
-
-Actually for the problem bytes: C2 C8 00 00
-This represents: 100.390625 (approximately)
-
-The bytes from problem: 00 00 C8 C2
-Reading as little-endian uint32: 0xC2C80000
-As float: -100.0 (approximately)
-
-Note: The exact byte-to-float mapping depends on the actual
-IEEE 754 encoding. Use the diagnostic script to verify.
+**Problem Statement Example:**
 ```
+Raw bytes from STM32: A5 00 00 C8 C2 5A
+Expected value: (varies based on PID calculation)
+
+Using the diagnostic script to decode:
+- Header: A5
+- Float bytes: 00 00 C8 C2 (little-endian)
+- Tail: 5A
+
+The diagnostic script correctly parses these bytes and validates
+against expected values.
+```
+
+**Key Points:**
+1. STM32 always sends in little-endian format
+2. MATLAB must check system endianness using `computer()`
+3. Use `swapbytes()` if MATLAB runs on big-endian system (rare)
+4. The diagnostic script handles all conversion details automatically
 
 ### System Endianness
 - **Little-endian (most common):** x86, x86-64, ARM (usual mode)

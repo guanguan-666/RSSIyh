@@ -76,12 +76,15 @@ function example_float_conversion_fix()
     %% Additional test with negative value
     fprintf('--- Testing with negative value: -84.00 ---\n');
     
+    % Get system endianness for creating test frame
+    [~, ~, system_endian] = computer;
+    
     % Create frame with -84.00
     neg_value = single(-84.00);
     neg_uint32 = typecast(neg_value, 'uint32');
     
     % Convert to little-endian bytes
-    if endian == 'L'
+    if system_endian == 'L'
         neg_bytes = typecast(neg_uint32, 'uint8');
     else
         neg_bytes = typecast(swapbytes(neg_uint32), 'uint8');
@@ -95,7 +98,7 @@ function example_float_conversion_fix()
     % Parse it back
     test_bytes = neg_frame(2:5);
     test_uint32 = typecast(uint8(test_bytes), 'uint32');
-    if endian == 'B'
+    if system_endian == 'B'
         test_uint32 = swapbytes(test_uint32);
     end
     parsed_value = typecast(test_uint32, 'single');

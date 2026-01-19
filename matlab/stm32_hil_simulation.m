@@ -11,7 +11,7 @@
 
 function stm32_hil_simulation()
     % Clear workspace
-    clear all;
+    clearvars;
     close all;
     clc;
     
