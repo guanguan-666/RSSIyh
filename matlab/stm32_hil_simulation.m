@@ -10,8 +10,7 @@
 % Date: 2026-01-19
 
 function stm32_hil_simulation()
-    % Clear workspace
-    clearvars;
+    % Clear workspace (optional, for cleaner debugging)
     close all;
     clc;
     
@@ -26,7 +25,7 @@ function stm32_hil_simulation()
     
     % Try to find available serial ports
     try
-        ports = serialportlist("available");
+        ports = serialportlist('available');
         if ~isempty(ports)
             fprintf('Available serial ports: %s\n', strjoin(ports, ', '));
             % Use first available port if COM3 doesn't exist
@@ -43,7 +42,7 @@ function stm32_hil_simulation()
     try
         % Try new serialport (R2019b+)
         s = serialport(COM_PORT, BAUD_RATE);
-        configureTerminator(s, "");
+        configureTerminator(s, '');
         flush(s);
         use_new_serial = true;
         fprintf('Serial port opened: %s @ %d baud (new API)\n', COM_PORT, BAUD_RATE);

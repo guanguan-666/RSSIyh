@@ -5,7 +5,6 @@
 % Date: 2026-01-19
 
 function stm32_diagnostic_test()
-    clearvars;
     clc;
     
     fprintf('=================================================\n');
