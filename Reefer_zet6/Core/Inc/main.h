@@ -89,6 +89,15 @@ typedef struct {
     uint8_t tail;   
 } MatlabRxFrame_t; // 此时 sizeof = 1+4+4+1 = 10
 
+// 接收：[新增] 参数更新数据包
+typedef struct {
+    uint8_t header;     // 0xB6 (新的帧头，用来区分)
+    float   new_kp;     // 新的 Kp
+    float   new_ki;     // 新的 Ki
+    float   new_kd;     // 新的 Kd
+    uint8_t tail;       // 0x5A
+} MatlabParamFrame_t;   // 大小 = 1+4+4+4+1 = 14 字节
+
 typedef struct {
     uint8_t header; 
     float output;   

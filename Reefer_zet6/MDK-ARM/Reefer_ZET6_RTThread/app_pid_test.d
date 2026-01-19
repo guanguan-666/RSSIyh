@@ -48,3 +48,4 @@ reefer_zet6_rtthread\app_pid_test.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1
 reefer_zet6_rtthread\app_pid_test.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim_ex.h
 reefer_zet6_rtthread\app_pid_test.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_uart.h
 reefer_zet6_rtthread\app_pid_test.o: ../Core/Inc/usart.h
+reefer_zet6_rtthread\app_pid_test.o: ..\My_Drivers\app_lora_protocol.h
